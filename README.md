@@ -18,3 +18,13 @@ Again, don't take this structure as something particularly thought out, it's jus
 In the root of the solution, there's a Docker Compose file to spin up the necessary dependencies, which are PostgreSQL and Kafka.
 
 Using JSON serialization for the events, good enough for demo purposes. For production scenarios, something like ProtoBuf or Avro are probably better options.
+
+## Main topics
+
+The main topics to be observed in this solution are:
+
+- Loose coupling by integrating through events
+- Outbox pattern to ensure at least once delivery
+- Event stream analysis (even if over-simplified)
+- Eventual consistency
+- Idempotency, by ensuring the same event isn't handled multiple times
