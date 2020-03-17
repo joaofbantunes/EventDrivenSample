@@ -1,0 +1,13 @@
+@page
+@model BurgerJoint.StoreFront.Features.Orders.Create
+
+@{
+    Layout = null;
+}
+
+<h1>Welcome to Tha Joint</h1>
+<form method="post">
+    <select asp-for="DishId" asp-items="Model.Dishes"></select>
+    <input asp-for="CustomerNumber"/>
+    <button type="submit">Order</button>
+</form>

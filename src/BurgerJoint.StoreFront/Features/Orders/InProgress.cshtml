@@ -1,0 +1,35 @@
+@page
+@using BurgerJoint.StoreFront.Data
+@model BurgerJoint.StoreFront.Features.Orders.InProgress
+
+@{
+    Layout = null;
+}
+<form method="post">
+    <ul>
+        @foreach (var order in Model.Orders)
+        {
+            <li>
+                <span>@order.Id | <span style="color: @GetColor(order.Status)">@order.Status</span> | @order.CreatedAt</span>
+                @if (order.Status == Status.Pending)
+                {
+                    <button type="submit" asp-page-handler="Deliver" asp-route-orderId="@order.Id">Deliver</button>
+                    <button type="submit" asp-page-handler="Cancel" asp-route-orderId="@order.Id">Cancel</button>
+                    <input asp-for="CancelReason"/>
+                }
+            </li>
+        }
+    </ul>
+    <a asp-page="./Create">Create order</a>
+</form>
+
+@functions
+{
+    string GetColor(Status status)
+        => status switch {
+            Status.Pending => "blue",
+            Status.Delivered => "green",
+            Status.Cancelled => "red",
+            _ => "purple"
+            };
+}
