@@ -1,10 +1,10 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using BurgerJoint.Events;
 using BurgerJoint.StoreFront.Data;
-using BurgerJoint.StoreFront.Data.Events;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using OrderCancelled = BurgerJoint.StoreFront.Data.Events.OrderCancelled;
@@ -21,7 +21,9 @@ namespace BurgerJoint.StoreFront.Infrastructure
         public OutboxMessagePublisher(IServiceScopeFactory scopeFactory)
         {
             _scopeFactory = scopeFactory;
-            // there's probably a smarter way to do this... but it'll do :)
+            
+            // I'm basically using a channel as an async auto reset event...
+            // There's probably a smarter way to do this, but for now it'll do :)
             _channel = Channel.CreateBounded<bool>(
                 new BoundedChannelOptions(1)
                 {
@@ -30,68 +32,72 @@ namespace BurgerJoint.StoreFront.Infrastructure
         }
 
         public void OnNewMessages()
-        {
-            _channel.Writer.TryWrite(true);
-        }
+            => _channel.Writer.TryWrite(true);
 
-        public async Task StartAsync()
+        public async Task RunAsync(CancellationToken ct)
         {
-            await foreach (var _ in _channel.Reader.ReadAllAsync())
+            await using var registration = ct.Register(() => _channel.Writer.Complete());
+            
+            await foreach (var _ in _channel.Reader.ReadAllAsync(ct))
             {
-                using var scope = _scopeFactory.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<BurgerDbContext>();
-                var publisher = scope.ServiceProvider.GetRequiredService<IOrderEventPublisher>();
-                var messages = await db.OutboxMessages.OrderBy(o => o.OrderEventBase.OccurredAt).ToListAsync();
-                foreach (var message in messages)
-                {
-                    await (message.OrderEventBase switch
-                    {
-                        OrderCreated created => publisher.PublishAsync(
-                            new Events.OrderCreated
-                            {
-                                Id = message.Id,
-                                DishId = created.DishId,
-                                OrderId = created.OrderId,
-                                CustomerNumber = created.CustomerNumber,
-                                OccurredAt = created.OccurredAt
-                            }),
-                        OrderDelivered delivered => publisher.PublishAsync(
-                            new Events.OrderDelivered
-                            {
-                                Id = message.Id,
-                                DishId = delivered.DishId,
-                                OrderId = delivered.OrderId,
-                                CustomerNumber = delivered.CustomerNumber,
-                                OccurredAt = delivered.OccurredAt
-                            }),
-                        OrderCancelled cancelled => publisher.PublishAsync(
-                            new Events.OrderCancelled
-                            {
-                                Id = message.Id,
-                                DishId = cancelled.DishId,
-                                OrderId = cancelled.OrderId,
-                                CustomerNumber = cancelled.CustomerNumber,
-                                OccurredAt = cancelled.OccurredAt
-                            }),
-                        _ => throw new NotImplementedException()
-                    });
-
-                    if (messages.Any())
-                    {
-                        db.RemoveRange(messages);
-                        await db.SaveChangesAsync();
-                    }
-                    
-                    // NOTE: this is missing concurrency control, as the outbox might be read in parallel
-                    // and messages published multiple times (this can always happen, but the least, the better)
-                }
+                await PublishOutboxMessagesAsync(ct);
             }
         }
 
-       public async Task StopAsync()
+        private async Task PublishOutboxMessagesAsync(CancellationToken ct)
         {
-            _channel.Writer.Complete();
-            await _channel.Reader.Completion;
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<BurgerDbContext>();
+            var publisher = scope.ServiceProvider.GetRequiredService<IOrderEventPublisher>();
+            
+            var messages = await db.OutboxMessages
+                .OrderBy(o => o.OrderEventBase.OccurredAt)
+                .ToListAsync(ct);
+            
+            foreach (var message in messages)
+            {
+                await (message.OrderEventBase switch
+                {
+                    OrderCreated created => publisher.PublishAsync(
+                        new Events.OrderCreated
+                        {
+                            Id = message.Id,
+                            DishId = created.DishId,
+                            OrderId = created.OrderId,
+                            CustomerNumber = created.CustomerNumber,
+                            OccurredAt = created.OccurredAt
+                        }),
+                    OrderDelivered delivered => publisher.PublishAsync(
+                        new Events.OrderDelivered
+                        {
+                            Id = message.Id,
+                            DishId = delivered.DishId,
+                            OrderId = delivered.OrderId,
+                            CustomerNumber = delivered.CustomerNumber,
+                            OccurredAt = delivered.OccurredAt
+                        }),
+                    OrderCancelled cancelled => publisher.PublishAsync(
+                        new Events.OrderCancelled
+                        {
+                            Id = message.Id,
+                            DishId = cancelled.DishId,
+                            OrderId = cancelled.OrderId,
+                            CustomerNumber = cancelled.CustomerNumber,
+                            OccurredAt = cancelled.OccurredAt
+                        }),
+                    _ => throw new NotImplementedException()
+                });
+
+                if (messages.Any())
+                {
+                    db.RemoveRange(messages);
+                    // ReSharper disable once MethodSupportsCancellation - events were already published, trying to commit that info 
+                    await db.SaveChangesAsync();
+                }
+
+                // NOTE: this is missing concurrency control, as the outbox might be read in parallel
+                // and messages published multiple times (this can always happen, but the least, the better)
+            }
         }
     }
 }
