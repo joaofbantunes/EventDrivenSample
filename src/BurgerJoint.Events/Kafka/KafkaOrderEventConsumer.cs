@@ -31,16 +31,17 @@ namespace BurgerJoint.Events.Kafka
                 .Build();
         }
 
-        // using Task.Run just because polling blocks
-        // after the await, the initial task will be let go,
-        // so no great advantage in doing Task.Factory.StartNew(x, LongRunning)
-        // TODO: find out if there is a better approach for this
-        public Task ConsumeAsync(Func<OrderEventBase, Task> callback, CancellationToken ct)
-            => Task.Run(async () =>
-            {
-                _logger.LogInformation("Subscribing");
-                _consumer.Subscribe("orders");
+        public Task Subscribe(Action<OrderEventBase> callback, CancellationToken ct)
+        {
+            _logger.LogInformation("Subscribing");
+            _consumer.Subscribe("orders");
 
+            var tcs = new TaskCompletionSource<bool>();
+            
+            // polling for messages is a blocking operation,
+            // so spawning a new thread to keep doing it in the background
+            var thread = new Thread(() =>
+            {
                 while (!ct.IsCancellationRequested)
                 {
                     try
@@ -54,9 +55,13 @@ namespace BurgerJoint.Events.Kafka
                             message.Value.Id,
                             message.Value.GetType().Name);
 
-                        await callback(message.Value);
+                        callback(message.Value);
 
                         _consumer.Commit(); // note: committing every time can have a negative impact on performance
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("Shutting down gracefully.");
                     }
                     catch (Exception ex)
                     {
@@ -66,6 +71,16 @@ namespace BurgerJoint.Events.Kafka
                         _logger.LogError(ex, "Error occurred when consuming event!");
                     }
                 }
-            });
+
+                tcs.SetResult(true);
+            })
+            {
+                IsBackground = true
+            };
+
+            thread.Start();
+
+            return tcs.Task;
+        }
     }
 }

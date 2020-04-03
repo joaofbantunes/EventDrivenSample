@@ -19,13 +19,13 @@ namespace BurgerJoint.Operations.Infrastructure
         }
 
         protected override Task ExecuteAsync(CancellationToken stoppingToken)
-            => _eventConsumer.ConsumeAsync(@event => ForwardEventAsync(@event), stoppingToken);
+            => _eventConsumer.Subscribe(ForwardEvent, stoppingToken);
 
-        private async Task ForwardEventAsync(OrderEventBase @event)
+        private void ForwardEvent(OrderEventBase @event)
         {
             using var scope = _scopeFactory.CreateScope();
             var eventHandler = scope.ServiceProvider.GetRequiredService<IOrderEventHandler>();
-            await eventHandler.HandleAsync(@event);
+            eventHandler.HandleAsync(@event).GetAwaiter().GetResult();
         }
     }
 }

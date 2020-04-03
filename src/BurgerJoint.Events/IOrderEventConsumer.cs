@@ -6,6 +6,6 @@ namespace BurgerJoint.Events
 {
     public interface IOrderEventConsumer
     {
-        Task ConsumeAsync(Func<OrderEventBase, Task> callback, CancellationToken ct);
+        Task Subscribe(Action<OrderEventBase> callback, CancellationToken ct);
     }
 }
