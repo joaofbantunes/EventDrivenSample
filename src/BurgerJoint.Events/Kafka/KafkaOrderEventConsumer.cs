@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace BurgerJoint.Events.Kafka
 {
-    public class KafkaOrderEventConsumer : IOrderEventConsumer
+    public class KafkaOrderEventConsumer : IOrderEventConsumer, IDisposable
     {
         private readonly ILogger<KafkaOrderEventConsumer> _logger;
         private readonly IConsumer<Guid, OrderEventBase> _consumer;
@@ -37,7 +37,7 @@ namespace BurgerJoint.Events.Kafka
             _consumer.Subscribe("orders");
 
             var tcs = new TaskCompletionSource<bool>();
-            
+
             // polling for messages is a blocking operation,
             // so spawning a new thread to keep doing it in the background
             var thread = new Thread(() =>
@@ -81,6 +81,20 @@ namespace BurgerJoint.Events.Kafka
             thread.Start();
 
             return tcs.Task;
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                _consumer?.Close();
+            }
+            catch (Exception)
+            {
+                // no exceptions in Dispose :)
+            }
+
+            _consumer?.Dispose();
         }
     }
 }
